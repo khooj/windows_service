@@ -1,7 +1,6 @@
 #include "updater_service.h"
 #include <functional>
 #include <experimental/filesystem>
-#include <chrono>
 #include <winsvc.h>
 #include <winnt.h>
 #include <tchar.h>
@@ -51,7 +50,7 @@ void UpdaterService::Work()
     while (true)
     {
         WriteToEventLog(_T("Cycle"));
-        std::this_thread::sleep_for(5s);
+        std::this_thread::sleep_for(interval_);
         if (exit_)
         {
             WriteToEventLog(_T("Exiting"));
@@ -89,6 +88,19 @@ void UpdaterService::ProcessArgs(int argc, char* argv[])
             t = argv[i + 1];
             SetName(_T(t.c_str()));
         }
+
+        if (t == "--interval")
+        {
+            if (i + 1 > argc)
+            {
+                WriteToEventLog("Wrong interval args");
+                return;
+            }
+
+            t = argv[i + 1];
+            unsigned long tmp = std::strtoul(t.c_str(), nullptr, 10);
+            interval_ = std::chrono::seconds{ tmp };
+        }
     }
 
     parsed_ = CheckArgs();
@@ -97,8 +109,11 @@ void UpdaterService::ProcessArgs(int argc, char* argv[])
 bool UpdaterService::CheckArgs() const
 {
     namespace fs = std::experimental::filesystem;
-    fs::path p(updater_filepath_);
+    const fs::path p(updater_filepath_);
     if (!fs::exists(p))
         return false;
+    if (interval_.count() == 0ULL)
+        return false;
+
     return true;
 }

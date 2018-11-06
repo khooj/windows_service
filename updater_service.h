@@ -5,6 +5,7 @@
 #include <thread>
 #include <memory>
 #include <string>
+#include <chrono>
 
 class UpdaterService : public ServiceBase
 {
@@ -29,6 +30,7 @@ private:
     bool exit_;
     bool parsed_;
     std::string updater_filepath_;
+    std::chrono::seconds interval_;
 };
 
 #endif
