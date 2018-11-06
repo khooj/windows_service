@@ -1,8 +1,8 @@
-#include "user_tracker_service.h"
+#include "UpdaterService.h"
 #include "service_installer.h"
 
 int _tmain(int argc, TCHAR* argv[]) {
-  UserTrackerService service;
+  UpdaterService service;
 
   if (argc > 1) {
     if (_tcscmp(argv[1], _T("install")) == 0) {

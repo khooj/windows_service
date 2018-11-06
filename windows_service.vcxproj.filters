@@ -26,6 +26,9 @@
     <ClInclude Include="user_tracker_service.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="UpdaterService.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp">
@@ -38,6 +41,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="user_tracker_service.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="UpdaterService.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

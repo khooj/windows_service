@@ -87,12 +87,14 @@
   <ItemGroup>
     <ClInclude Include="service_base.h" />
     <ClInclude Include="service_installer.h" />
+    <ClInclude Include="UpdaterService.h" />
     <ClInclude Include="user_tracker_service.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp" />
     <ClCompile Include="service_base.cpp" />
     <ClCompile Include="service_installer.cpp" />
+    <ClCompile Include="UpdaterService.cpp" />
     <ClCompile Include="user_tracker_service.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
