@@ -1,6 +1,10 @@
 #include "updater_service.h"
 #include <functional>
 #include <chrono>
+#include <experimental/filesystem>
+#include <winsvc.h>
+#include <winnt.h>
+#include <tchar.h>
 
 using namespace std::chrono_literals;
 
@@ -16,24 +20,34 @@ UpdaterService::UpdaterService()
 
 void UpdaterService::OnStart(DWORD argc, TCHAR * argv[])
 {
-    mut_.unlock();
+    WriteToEventLog(_T("Starting"));
+    for (DWORD i = 0; i < argc; ++i)
+        WriteToEventLog(argv[i]);
+
+    exit_ = false;
+    WriteToEventLog(_T("Started!"));
     thread_ = std::make_unique<std::thread>(std::bind(&UpdaterService::Work, this));
-    thread_->detach();
 }
 
 void UpdaterService::OnStop()
 {
-    mut_.lock();
+    exit_ = true;
+    WriteToEventLog(_T("Stopped!"));
     if (thread_->joinable())
         thread_->join();
 }
 
 void UpdaterService::Work()
 {
+    namespace fs = std::experimental::filesystem;
     while (true)
     {
+        WriteToEventLog(_T("Cycle"));
         std::this_thread::sleep_for(5s);
-        if (mut_.try_lock())
+        if (exit_)
+        {
+            WriteToEventLog(_T("Exiting"));
             return;
+        }
     }
 }

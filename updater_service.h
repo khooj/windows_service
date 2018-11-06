@@ -3,7 +3,6 @@
 
 #include "service_base.h"
 #include <thread>
-#include <mutex>
 #include <memory>
 
 class UpdaterService : public ServiceBase
@@ -24,7 +23,7 @@ private:
     void Work();
 
     std::unique_ptr<std::thread> thread_;
-    std::mutex mut_;
+    bool exit_;
 };
 
 #endif

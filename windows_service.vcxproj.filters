@@ -26,7 +26,7 @@
     <ClInclude Include="user_tracker_service.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="UpdaterService.h">
+    <ClInclude Include="updater_service.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
@@ -43,7 +43,7 @@
     <ClCompile Include="user_tracker_service.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="UpdaterService.cpp">
+    <ClCompile Include="updater_service.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
