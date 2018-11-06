@@ -4,6 +4,7 @@
 #include "service_base.h"
 #include <thread>
 #include <memory>
+#include <string>
 
 class UpdaterService : public ServiceBase
 {
@@ -21,10 +22,13 @@ private:
     void OnStop() override;
 
     void Work();
-
+    void ProcessArgs(int argc, char *argv[]);
+    bool CheckArgs() const;
 
     std::unique_ptr<std::thread> thread_;
     bool exit_;
+    bool parsed_;
+    std::string updater_filepath_;
 };
 
 #endif

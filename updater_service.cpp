@@ -1,11 +1,13 @@
 #include "updater_service.h"
 #include <functional>
-#include <chrono>
 #include <experimental/filesystem>
+#include <chrono>
 #include <winsvc.h>
 #include <winnt.h>
 #include <tchar.h>
+#include <cstdlib>
 
+using namespace std::string_literals;
 using namespace std::chrono_literals;
 
 UpdaterService::UpdaterService(int argc, char *argv[])
@@ -16,13 +18,19 @@ UpdaterService::UpdaterService(int argc, char *argv[])
         SERVICE_ERROR_NORMAL,
         SERVICE_ACCEPT_STOP)
 {
+    parsed_ = false;
+    ProcessArgs(argc, argv);
 }
 
 void UpdaterService::OnStart(DWORD argc, TCHAR* argv[])
 {
-    WriteToEventLog(_T("Starting"));
-    for (DWORD i = 0; i < argc; ++i)
-        WriteToEventLog(argv[i]);
+    ProcessArgs(static_cast<int>(argc), static_cast<char**>(argv));
+
+    if (!parsed_)
+    {
+        std::exit(-1);
+        return;
+    }
 
     exit_ = false;
     WriteToEventLog(_T("Started!"));
@@ -50,4 +58,47 @@ void UpdaterService::Work()
             return;
         }
     }
+}
+
+void UpdaterService::ProcessArgs(int argc, char* argv[])
+{
+    //skipping executable name
+    for (int i = 1; i < argc; ++i)
+    {
+        std::string t(argv[i]);
+
+        if (t == "--updater")
+        {
+            if (i + 1 > argc)
+            {
+                WriteToEventLog("Wrong updater args");
+                return;
+            }
+
+            updater_filepath_ = argv[i + 1];
+        }
+
+        if (t == "--name")
+        {
+            if (i + 1 > argc)
+            {
+                WriteToEventLog("Wrong name args");
+                return;
+            }
+
+            t = argv[i + 1];
+            SetName(_T(t.c_str()));
+        }
+    }
+
+    parsed_ = CheckArgs();
+}
+
+bool UpdaterService::CheckArgs() const
+{
+    namespace fs = std::experimental::filesystem;
+    fs::path p(updater_filepath_);
+    if (!fs::exists(p))
+        return false;
+    return true;
 }
