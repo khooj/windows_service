@@ -18,7 +18,7 @@ UpdaterService::UpdaterService()
 {
 }
 
-void UpdaterService::OnStart(DWORD argc, TCHAR * argv[])
+void UpdaterService::OnStart(DWORD argc, TCHAR* argv[])
 {
     WriteToEventLog(_T("Starting"));
     for (DWORD i = 0; i < argc; ++i)
