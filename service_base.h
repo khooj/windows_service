@@ -43,6 +43,8 @@ protected:
                 const CString& account = _T(""),
                 const CString& password = _T(""));
 
+    void SetName(CString name) { m_name = name; }
+
     void SetStatus(DWORD dwState, DWORD dwErrCode = NO_ERROR, DWORD dwWait = 0);
 
     // TODO(Olster): Move out of class/make static.

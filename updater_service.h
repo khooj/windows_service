@@ -8,7 +8,7 @@
 class UpdaterService : public ServiceBase
 {
 public:
-    explicit UpdaterService();
+    UpdaterService(int argc, char *argv[]);
 
     UpdaterService(const UpdaterService&) = delete;
     UpdaterService& operator=(const UpdaterService&) = delete;
@@ -21,6 +21,7 @@ private:
     void OnStop() override;
 
     void Work();
+
 
     std::unique_ptr<std::thread> thread_;
     bool exit_;

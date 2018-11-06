@@ -8,7 +8,7 @@
 
 using namespace std::chrono_literals;
 
-UpdaterService::UpdaterService()
+UpdaterService::UpdaterService(int argc, char *argv[])
     : ServiceBase(
         _T("UpdaterService"),
         _T("Updater service"),
