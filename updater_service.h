@@ -17,6 +17,7 @@ public:
 
     UpdaterService(UpdaterService&&) = delete;
     UpdaterService& operator=(UpdaterService&&) = delete;
+    virtual ~UpdaterService() = default;
 
 private:
     void OnStart(DWORD argc, TCHAR* argv[]) override;
@@ -25,11 +26,13 @@ private:
     void Work();
     void ProcessArgs(int argc, char *argv[]);
     bool CheckArgs() const;
+    bool LaunchApp(const std::string& additional_args, DWORD &ret) const;
 
     std::unique_ptr<std::thread> thread_;
     bool exit_;
     bool parsed_;
     std::string updater_filepath_;
+    std::string updater_arguments_;
     std::chrono::seconds interval_;
 };
 
