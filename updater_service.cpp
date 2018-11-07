@@ -186,8 +186,11 @@ bool UpdaterService::LaunchApp(const std::string& additional_args, DWORD& ret) c
     namespace fs = std::experimental::filesystem;
     fs::path updater_path(updater_filepath_);
     STARTUPINFO si;
+    ZeroMemory(&si, sizeof(STARTUPINFO));
     si.cb = sizeof(si);
+    si.lpDesktop = "winsta0\\default";
     PROCESS_INFORMATION pi;
+    ZeroMemory(&pi, sizeof(pi));
     std::string args{ updater_arguments_ + " " + additional_args };
     if (CreateProcess(
         updater_path.generic_string().c_str(),
