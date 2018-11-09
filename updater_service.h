@@ -26,9 +26,9 @@ private:
     
     void ProcessArgs(int argc, char *argv[]);
     bool CheckArgs() const;
-    bool LaunchApp(const std::string& additional_args, DWORD &ret);
+    bool LaunchApp(const std::string& additional_args, DWORD &ret) const;
 
-    std::wstring s2ws(const std::string& s);
+    std::wstring s2ws(const std::string& s) const;
 
     std::unique_ptr<std::thread> thread_;
     bool exit_;

@@ -225,7 +225,7 @@ bool UpdaterService::CheckArgs() const
     return true;
 }
 
-bool UpdaterService::LaunchApp(const std::string& additional_args, DWORD& ret)
+bool UpdaterService::LaunchApp(const std::string& additional_args, DWORD& ret) const
 {
     namespace fs = std::experimental::filesystem;
     fs::path updater_path(updater_filepath_);
@@ -312,7 +312,7 @@ bool UpdaterService::LaunchApp(const std::string& additional_args, DWORD& ret)
     return exit;
 }
 
-std::wstring UpdaterService::s2ws(const std::string& s)
+std::wstring UpdaterService::s2ws(const std::string& s) const
 {
     int len;
     int slength = (int)s.length() + 1;
