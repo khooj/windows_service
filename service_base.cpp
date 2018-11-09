@@ -38,7 +38,7 @@ void ServiceBase::SetStatus(DWORD dwState, DWORD dwErrCode, DWORD dwWait)
     ::SetServiceStatus(m_svcStatusHandle, &m_svcStatus);
 }
 
-void ServiceBase::WriteToEventLog(const CString& msg, WORD type)
+void ServiceBase::WriteToEventLog(const CString& msg, WORD type) const
 {
     HANDLE hSource = RegisterEventSource(nullptr, m_name);
     if (hSource)
