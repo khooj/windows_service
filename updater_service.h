@@ -32,7 +32,6 @@ private:
 
     std::unique_ptr<std::thread> thread_;
     bool exit_;
-    bool parsed_;
     std::string updater_filepath_;
     std::string updater_arguments_;
     std::string user_runas_;

@@ -26,7 +26,6 @@ UpdaterService::UpdaterService(int argc, char *argv[])
         SERVICE_ERROR_NORMAL,
         SERVICE_ACCEPT_STOP)
     , exit_(false)
-    , parsed_(false)
     , interval_(0)
 {
     ProcessArgs(argc, argv);
@@ -36,7 +35,7 @@ void UpdaterService::OnStart(DWORD argc, TCHAR* argv[])
 {
     ProcessArgs(static_cast<int>(argc), static_cast<char**>(argv));
 
-    if (!parsed_)
+    if (!CheckArgs())
     {
         std::exit(-1);
     }
@@ -196,8 +195,6 @@ void UpdaterService::ProcessArgs(int argc, char* argv[])
             DEBUG_LOG(g);
         }
     }
-
-    parsed_ = CheckArgs();
 }
 
 bool UpdaterService::CheckArgs() const
