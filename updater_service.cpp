@@ -64,7 +64,7 @@ void UpdaterService::Work()
         if (!LaunchApp(std::string(), ret))
         {
             std::string g{ "Error while launching updater: " + std::to_string(GetLastError()) };
-            WriteToEventLog(g.c_str());
+            WriteToEventLog(g.c_str(), EVENTLOG_ERROR_TYPE);
             break;
         }
 
@@ -80,7 +80,7 @@ void UpdaterService::Work()
             if (!LaunchApp(std::string("-u"), ret))
             {
                 std::string g{ "Error while launching updater with -u: " + std::to_string(GetLastError()) };
-                WriteToEventLog(g.c_str());
+                WriteToEventLog(g.c_str(), EVENTLOG_ERROR_TYPE);
                 break;
             }
 
@@ -228,28 +228,43 @@ bool UpdaterService::LaunchApp(const std::string& additional_args, DWORD& ret) c
     fs::path updater_path(updater_filepath_);
     std::string args{ updater_arguments_ + " " + additional_args };
 
-    //HANDLE child_out_rd = NULL;
-    //HANDLE child_out_wr = NULL;
-    //
-    //SECURITY_ATTRIBUTES saAttr;
-    //saAttr.nLength = sizeof(SECURITY_ATTRIBUTES);
-    //saAttr.bInheritHandle = TRUE;
-    //saAttr.lpSecurityDescriptor = NULL;
-    //
-    //if (!CreatePipe(&child_out_rd, &child_out_wr, &saAttr, 0))
-    //    return false;
-    //if (!SetHandleInformation(child_out_rd, HANDLE_FLAG_INHERIT, 0))
-    //    return false;
+    HANDLE child_out_rd = NULL;
+    HANDLE child_out_wr = NULL;
+    
+    SECURITY_ATTRIBUTES saAttr;
+    saAttr.nLength = sizeof(SECURITY_ATTRIBUTES);
+    saAttr.bInheritHandle = TRUE;
+    saAttr.lpSecurityDescriptor = NULL;
+    
+    if (!CreatePipe(&child_out_rd, &child_out_wr, &saAttr, 0))
+        return false;
+    if (!SetHandleInformation(child_out_rd, HANDLE_FLAG_INHERIT, 0))
+        return false;
 
     STARTUPINFOW si;
     ZeroMemory(&si, sizeof(STARTUPINFOW));
     si.cb = sizeof(STARTUPINFOW);
-    //si.hStdError = child_out_wr;
-    //si.hStdOutput = child_out_wr;
-    //si.dwFlags |= STARTF_USESTDHANDLES;
+    si.hStdError = child_out_wr;
+    si.hStdOutput = child_out_wr;
+    si.dwFlags |= STARTF_USESTDHANDLES;
 
     PROCESS_INFORMATION pi;
     ZeroMemory(&pi, sizeof(pi));
+
+    const auto readOutput = [&] {
+        DWORD dwRead, dwWritten;
+        CHAR buf[4096];
+        BOOL success = FALSE;
+        DEBUG_LOG("Reading app stdout");
+        for (;;)
+        {
+            success = ReadFile(child_out_rd, buf, 4096, &dwRead, NULL);
+            if (!success || dwRead == 0)
+                break;
+            std::string g{ "Process stdout: " + std::string(buf, dwRead) };
+            WriteToEventLog(g.c_str());
+        }
+    };
 
     std::wstring args_w = s2ws(args);
 
@@ -267,9 +282,12 @@ bool UpdaterService::LaunchApp(const std::string& additional_args, DWORD& ret) c
         &pi
     ) == 0)
     {
-        DEBUG_LOG("Error launching app");
-        WriteToEventLog("Error launching app", EVENTLOG_ERROR_TYPE);
-        return false;
+        if (GetLastError() != 0)
+        {
+            DEBUG_LOG("Error launching app");
+            WriteToEventLog("Error launching app", EVENTLOG_ERROR_TYPE);
+            return false;
+        }
     }
 
     std::chrono::milliseconds m{ 5min };
@@ -278,34 +296,21 @@ bool UpdaterService::LaunchApp(const std::string& additional_args, DWORD& ret) c
     {
         DEBUG_LOG("Wait for updater timeout or failed");
         WriteToEventLog("Waiting for process failed or timed out", EVENTLOG_WARNING_TYPE);
+        readOutput();
         CloseHandle(pi.hProcess);
         CloseHandle(pi.hThread);
-        //CloseHandle(child_out_wr);
-        //CloseHandle(child_out_rd);
+        CloseHandle(child_out_wr);
+        CloseHandle(child_out_rd);
         return false;
     }
 
     bool exit = GetExitCodeProcess(pi.hProcess, &ret) != 0;
 
-#if 0
-    DWORD dwRead, dwWritten;
-    CHAR buf[4096];
-    BOOL success = FALSE;
-    DEBUG_LOG("Reading app stdout");
-    for (;;)
-    {
-        success = ReadFile(child_out_rd, buf, 4096, &dwRead, NULL);
-        if (!success || dwRead == 0)
-            break;
-        std::string g{ "Process stdout: " + std::string(buf, dwRead) };
-        WriteToEventLog(g.c_str());
-    }
-#endif
     DEBUG_LOG("Exit LaunchApp");
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
-    //CloseHandle(child_out_wr);
-    //CloseHandle(child_out_rd);
+    CloseHandle(child_out_wr);
+    CloseHandle(child_out_rd);
     return exit;
 }
 
