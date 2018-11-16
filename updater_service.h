@@ -26,7 +26,9 @@ private:
     
     void ProcessArgs(int argc, char *argv[]);
     bool CheckArgs() const;
-    bool LaunchApp(const std::string& additional_args, DWORD &ret) const;
+    bool LaunchApp(const std::string& additional_args, DWORD &ret);
+    bool LaunchAppWithLogon(std::wstring& args, DWORD& ret) const;
+    bool LaunchAppWithoutLogin(std::string& args, DWORD& ret) const;
 
     std::wstring s2ws(const std::string& s) const;
 
@@ -36,7 +38,10 @@ private:
     std::string updater_arguments_;
     std::string user_runas_;
     std::string user_pass_;
+    uint32_t count_;
     std::chrono::seconds interval_;
+    HANDLE child_out_rd { NULL };
+    HANDLE child_out_wr { NULL };
 };
 
 #endif

@@ -26,6 +26,7 @@ UpdaterService::UpdaterService(int argc, char *argv[])
         SERVICE_ERROR_NORMAL,
         SERVICE_ACCEPT_STOP)
     , exit_(false)
+    , count_(0)
     , interval_(0)
 {
     ProcessArgs(argc, argv);
@@ -56,10 +57,15 @@ void UpdaterService::OnStop()
 
 void UpdaterService::Work()
 {
+    uint32_t current_count{ 0 };
     while (!exit_)
     {
         WRITE_EVENT_DEBUG("New cycle");
-        std::this_thread::sleep_for(interval_);
+        std::this_thread::sleep_for(5s);
+        ++current_count;
+        if (current_count <= count_)
+            continue;
+        current_count = 0;
         DWORD ret = -1;
         if (!LaunchApp(std::string(), ret))
         {
@@ -162,6 +168,9 @@ void UpdaterService::ProcessArgs(int argc, char* argv[])
             t = argv[i + 1];
             unsigned long tmp = std::strtoul(t.c_str(), nullptr, 10);
             interval_ = std::chrono::seconds{ tmp };
+            if (interval_ < 5s)
+                interval_ = 5s;
+            count_ = interval_ / 5s;
             std::string g{ "Interval: " + std::to_string(interval_.count()) };
             WRITE_EVENT_DEBUG(g.c_str());
             DEBUG_LOG(g);
@@ -207,49 +216,32 @@ bool UpdaterService::CheckArgs() const
         return false;
     }
 
-    if (interval_.count() == 0ULL)
+    if (count_ == 0)
     {
-        WriteToEventLog("Interval is 0", EVENTLOG_ERROR_TYPE);
-        return false;
-    }
-
-    if (user_runas_.empty())
-    {
-        WriteToEventLog("Username is empty", EVENTLOG_ERROR_TYPE);
+        WriteToEventLog("Interval is invalid", EVENTLOG_ERROR_TYPE);
         return false;
     }
 
     return true;
 }
 
-bool UpdaterService::LaunchApp(const std::string& additional_args, DWORD& ret) const
+bool UpdaterService::LaunchApp(const std::string& additional_args, DWORD& ret)
 {
-    namespace fs = std::experimental::filesystem;
-    fs::path updater_path(updater_filepath_);
     std::string args{ updater_arguments_ + " " + additional_args };
+    std::wstring args_w = s2ws(args);
 
-    HANDLE child_out_rd = NULL;
-    HANDLE child_out_wr = NULL;
-    
     SECURITY_ATTRIBUTES saAttr;
     saAttr.nLength = sizeof(SECURITY_ATTRIBUTES);
     saAttr.bInheritHandle = TRUE;
     saAttr.lpSecurityDescriptor = NULL;
+
+    child_out_rd = NULL;
+    child_out_wr = NULL;
     
     if (!CreatePipe(&child_out_rd, &child_out_wr, &saAttr, 0))
         return false;
     if (!SetHandleInformation(child_out_rd, HANDLE_FLAG_INHERIT, 0))
         return false;
-
-    STARTUPINFOW si;
-    ZeroMemory(&si, sizeof(STARTUPINFOW));
-    si.cb = sizeof(STARTUPINFOW);
-    si.hStdError = child_out_wr;
-    si.hStdOutput = child_out_wr;
-    si.dwFlags |= STARTF_USESTDHANDLES;
-
-    PROCESS_INFORMATION pi;
-    ZeroMemory(&pi, sizeof(pi));
 
     const auto readOutput = [&] {
         DWORD dwRead, dwWritten;
@@ -266,7 +258,34 @@ bool UpdaterService::LaunchApp(const std::string& additional_args, DWORD& ret) c
         }
     };
 
-    std::wstring args_w = s2ws(args);
+    bool res;
+    if (user_runas_.empty())
+        res = LaunchAppWithoutLogin(args, ret);
+    else
+        res = LaunchAppWithLogon(args_w, ret);
+
+    if (!res)
+        readOutput();
+
+    CloseHandle(child_out_rd);
+    CloseHandle(child_out_wr);
+    return res;
+}
+
+bool UpdaterService::LaunchAppWithLogon(std::wstring& args, DWORD &ret) const
+{
+    namespace fs = std::experimental::filesystem;
+    fs::path updater_path(updater_filepath_);
+
+    STARTUPINFOW si;
+    ZeroMemory(&si, sizeof(STARTUPINFOW));
+    si.cb = sizeof(STARTUPINFOW);
+    si.hStdError = child_out_wr;
+    si.hStdOutput = child_out_wr;
+    si.dwFlags |= STARTF_USESTDHANDLES;
+
+    PROCESS_INFORMATION pi;
+    ZeroMemory(&pi, sizeof(pi));
 
     if (CreateProcessWithLogonW(
         s2ws(user_runas_).c_str(),
@@ -274,7 +293,7 @@ bool UpdaterService::LaunchApp(const std::string& additional_args, DWORD& ret) c
         s2ws(user_pass_).c_str(),
         0,
         updater_path.generic_wstring().c_str(),
-        const_cast<LPWSTR>(&args_w.data()[0]),
+        const_cast<LPWSTR>(&args.data()[0]),
         0,
         NULL,
         updater_path.parent_path().generic_wstring().c_str(),
@@ -296,11 +315,8 @@ bool UpdaterService::LaunchApp(const std::string& additional_args, DWORD& ret) c
     {
         DEBUG_LOG("Wait for updater timeout or failed");
         WriteToEventLog("Waiting for process failed or timed out", EVENTLOG_WARNING_TYPE);
-        readOutput();
         CloseHandle(pi.hProcess);
         CloseHandle(pi.hThread);
-        CloseHandle(child_out_wr);
-        CloseHandle(child_out_rd);
         return false;
     }
 
@@ -309,8 +325,61 @@ bool UpdaterService::LaunchApp(const std::string& additional_args, DWORD& ret) c
     DEBUG_LOG("Exit LaunchApp");
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
-    CloseHandle(child_out_wr);
-    CloseHandle(child_out_rd);
+    return exit;
+}
+
+bool UpdaterService::LaunchAppWithoutLogin(std::string& args, DWORD& ret) const
+{
+    namespace fs = std::experimental::filesystem;
+    fs::path updater_path(updater_filepath_);
+
+    STARTUPINFO si;
+    ZeroMemory(&si, sizeof(STARTUPINFO));
+    si.cb = sizeof(STARTUPINFO);
+    si.hStdError = child_out_wr;
+    si.hStdOutput = child_out_wr;
+    si.dwFlags |= STARTF_USESTDHANDLES;
+
+    PROCESS_INFORMATION pi;
+    ZeroMemory(&pi, sizeof(pi));
+
+    if (CreateProcess(
+        updater_path.generic_string().c_str(),
+        const_cast<LPSTR>(args.c_str()),
+        NULL,
+        NULL,
+        FALSE,
+        0,
+        NULL,
+        updater_path.parent_path().generic_string().c_str(),
+        &si,
+        &pi
+    ) == 0)
+    {
+        if (GetLastError() != 0)
+        {
+            DEBUG_LOG("Error launching app");
+            WriteToEventLog("Error launching app", EVENTLOG_ERROR_TYPE);
+            return false;
+        }
+    }
+
+    std::chrono::milliseconds m{ 5min };
+    DWORD res = WaitForSingleObject(pi.hProcess, m.count());
+    if (res == WAIT_TIMEOUT || res == WAIT_FAILED)
+    {
+        DEBUG_LOG("Wait for updater timeout or failed");
+        WriteToEventLog("Waiting for process failed or timed out", EVENTLOG_WARNING_TYPE);
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+        return false;
+    }
+
+    bool exit = GetExitCodeProcess(pi.hProcess, &ret) != 0;
+
+    DEBUG_LOG("Exit LaunchApp");
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
     return exit;
 }
 
