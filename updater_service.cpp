@@ -244,7 +244,7 @@ bool UpdaterService::LaunchApp(const std::string& additional_args, DWORD& ret)
         return false;
 
     const auto readOutput = [&] {
-        DWORD dwRead, dwWritten;
+        DWORD dwRead;
         CHAR buf[4096];
         BOOL success = FALSE;
         DEBUG_LOG("Reading app stdout");
@@ -265,10 +265,15 @@ bool UpdaterService::LaunchApp(const std::string& additional_args, DWORD& ret)
         res = LaunchAppWithLogon(args_w, ret);
 
     if (!res)
+    {
+        CloseHandle(child_out_wr);
+        child_out_wr = NULL;
         readOutput();
+    }
 
+    if (child_out_wr != NULL)
+        CloseHandle(child_out_wr);
     CloseHandle(child_out_rd);
-    CloseHandle(child_out_wr);
     return res;
 }
 
