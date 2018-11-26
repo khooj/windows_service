@@ -20,6 +20,24 @@ public:
     virtual ~UpdaterService() = default;
     
 private:
+    class HandleOwner
+    {
+    public:
+        HandleOwner();
+        HandleOwner(HANDLE handle);
+        ~HandleOwner();
+
+        HandleOwner(HANDLE&&) = delete;
+        HandleOwner(const HandleOwner&) = delete;
+        HandleOwner& operator=(const HandleOwner&) = delete;
+
+        HandleOwner& operator=(HANDLE handle);
+        operator HANDLE() const;
+        operator PHANDLE();
+    private:
+        HANDLE h_;
+    };
+
     void Work();
     void OnStart(DWORD argc, TCHAR* argv[]) override;
     void OnStop() override;
@@ -29,7 +47,8 @@ private:
     bool CheckArgs() const;
     bool LaunchApp(const std::string& additional_args, DWORD &ret);
     bool LaunchAppWithLogon(std::wstring& args, DWORD& ret) const;
-    bool LaunchAppWithoutLogin(std::string& args, DWORD& ret) const;
+    bool LaunchAppWithoutLogon(std::string& args, DWORD& ret) const;
+    bool WaitForProcess(const HandleOwner& process, std::chrono::milliseconds msecs) const;
 
     std::wstring s2ws(const std::string& s) const;
 
@@ -41,8 +60,8 @@ private:
     std::string user_pass_;
     uint64_t count_;
     std::chrono::seconds interval_;
-    HANDLE child_out_rd { NULL };
-    HANDLE child_out_wr { NULL };
+    HandleOwner child_out_rd;
+    HandleOwner child_out_wr;
 };
 
 #endif

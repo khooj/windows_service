@@ -40,6 +40,39 @@ UpdaterService::UpdaterService(int argc, char *argv[])
 {
 }
 
+UpdaterService::HandleOwner::HandleOwner() : h_(NULL)
+{
+}
+
+UpdaterService::HandleOwner::HandleOwner(HANDLE handle) : h_(handle)
+{
+}
+
+
+UpdaterService::HandleOwner::~HandleOwner()
+{
+    if (h_ != NULL)
+        CloseHandle(h_);
+}
+
+UpdaterService::HandleOwner& UpdaterService::HandleOwner::operator=(HANDLE handle)
+{
+    if (h_ != NULL)
+        CloseHandle(h_);
+    h_ = handle;
+    return *this;
+}
+
+UpdaterService::HandleOwner::operator HANDLE() const
+{
+    return h_;
+}
+
+UpdaterService::HandleOwner::operator PHANDLE()
+{
+    return &h_;
+}
+
 void UpdaterService::OnStart(DWORD argc, TCHAR* argv[])
 {
     if (argc > 1)
@@ -88,6 +121,13 @@ void UpdaterService::Work()
         if (ret == 0)
         {
             WRITE_EVENT_DEBUG("No updates");
+            continue;
+        }
+
+        if (ret == 3)
+        {
+            std::string g{ "Updater returned error" };
+            WriteToEventLog(g.c_str(), EVENTLOG_ERROR_TYPE);
             continue;
         }
 
@@ -299,10 +339,10 @@ bool UpdaterService::LaunchApp(const std::string& additional_args, DWORD& ret)
     saAttr.bInheritHandle = TRUE;
     saAttr.lpSecurityDescriptor = NULL;
 
-    child_out_rd = NULL;
     child_out_wr = NULL;
+    child_out_rd = NULL;
     
-    if (!CreatePipe(&child_out_rd, &child_out_wr, &saAttr, 0))
+    if (!CreatePipe(child_out_rd, child_out_wr, &saAttr, 0))
         return false;
     if (!SetHandleInformation(child_out_rd, HANDLE_FLAG_INHERIT, 0))
         return false;
@@ -324,20 +364,16 @@ bool UpdaterService::LaunchApp(const std::string& additional_args, DWORD& ret)
 
     bool res;
     if (user_runas_.empty())
-        res = LaunchAppWithoutLogin(args, ret);
+        res = LaunchAppWithoutLogon(args, ret);
     else
         res = LaunchAppWithLogon(args_w, ret);
 
     if (!res)
     {
-        CloseHandle(child_out_wr);
         child_out_wr = NULL;
         readOutput();
     }
 
-    if (child_out_wr != NULL)
-        CloseHandle(child_out_wr);
-    CloseHandle(child_out_rd);
     return res;
 }
 
@@ -355,6 +391,9 @@ bool UpdaterService::LaunchAppWithLogon(std::wstring& args, DWORD &ret) const
 
     PROCESS_INFORMATION pi;
     ZeroMemory(&pi, sizeof(pi));
+
+    HandleOwner proc;
+    HandleOwner thread;
 
     if (CreateProcessWithLogonW(
         s2ws(user_runas_).c_str(),
@@ -378,26 +417,18 @@ bool UpdaterService::LaunchAppWithLogon(std::wstring& args, DWORD &ret) const
         }
     }
 
-    std::chrono::milliseconds m{ 5min };
-    DWORD res = WaitForSingleObject(pi.hProcess, static_cast<DWORD>(m.count()));
-    if (res == WAIT_TIMEOUT || res == WAIT_FAILED)
-    {
-        DEBUG_LOG("Wait for updater timeout or failed");
-        WriteToEventLog("Waiting for process failed or timed out", EVENTLOG_WARNING_TYPE);
-        CloseHandle(pi.hProcess);
-        CloseHandle(pi.hThread);
-        return false;
-    }
+    proc = pi.hProcess;
+    thread = pi.hThread;
 
-    bool exit = GetExitCodeProcess(pi.hProcess, &ret) != 0;
+    bool exit = WaitForProcess(proc, 5min);
+    if (exit)
+        exit = GetExitCodeProcess(proc, &ret) != 0;
 
     DEBUG_LOG("Exit LaunchApp");
-    CloseHandle(pi.hProcess);
-    CloseHandle(pi.hThread);
     return exit;
 }
 
-bool UpdaterService::LaunchAppWithoutLogin(std::string& args, DWORD& ret) const
+bool UpdaterService::LaunchAppWithoutLogon(std::string& args, DWORD& ret) const
 {
     namespace fs = std::experimental::filesystem;
     fs::path updater_path(updater_filepath_);
@@ -411,6 +442,9 @@ bool UpdaterService::LaunchAppWithoutLogin(std::string& args, DWORD& ret) const
 
     PROCESS_INFORMATION pi;
     ZeroMemory(&pi, sizeof(pi));
+
+    HandleOwner proc;
+    HandleOwner thread;
 
     if (CreateProcess(
         updater_path.generic_string().c_str(),
@@ -433,23 +467,66 @@ bool UpdaterService::LaunchAppWithoutLogin(std::string& args, DWORD& ret) const
         }
     }
 
-    std::chrono::milliseconds m{ 5min };
-    DWORD res = WaitForSingleObject(pi.hProcess, static_cast<DWORD>(m.count()));
-    if (res == WAIT_TIMEOUT || res == WAIT_FAILED)
+    proc = pi.hProcess;
+    thread = pi.hThread;
+
+    bool exit = WaitForProcess(proc, 5min);
+    if (exit)
+        exit = GetExitCodeProcess(proc, &ret) != 0;
+    DEBUG_LOG("Exit LaunchApp");
+    return exit;
+}
+
+bool UpdaterService::WaitForProcess(const HandleOwner& process, std::chrono::milliseconds msecs) const
+{
+    std::chrono::milliseconds timeout_chunk{ 5s };
+    const uint64_t max_count = (msecs >= 5s ? msecs : 5s) / timeout_chunk;
+    uint64_t count{ 0 };
+    while (count < max_count)
     {
-        DEBUG_LOG("Wait for updater timeout or failed");
-        WriteToEventLog("Waiting for process failed or timed out", EVENTLOG_WARNING_TYPE);
-        CloseHandle(pi.hProcess);
-        CloseHandle(pi.hThread);
+        ++count;
+        DWORD res = WaitForSingleObject(process, static_cast<DWORD>(timeout_chunk.count()));
+        if (res == WAIT_TIMEOUT)
+        {
+            if (!exit_)
+            {
+                WRITE_EVENT_DEBUG("Waiting timed out, new cycle");
+                continue;
+            }
+
+            WRITE_EVENT_DEBUG("Waiting timeout out, terminating process");
+            TerminateProcess(process, 3);
+            return true;
+        }
+        if (res == WAIT_FAILED)
+        {
+            if (GetLastError() == 109)
+            {
+                // app wrote nothing to stdout and closed pipe
+                // probably it exited successfully
+                WRITE_EVENT_DEBUG("Broken pipe in waiting for app. Exiting with true");
+                return true;
+            }
+
+            DEBUG_LOG("Wait for updater failed");
+            WriteToEventLog(std::string{ "Waiting for process failed: " + std::to_string(GetLastError()) }.c_str(), EVENTLOG_WARNING_TYPE);
+            return false;
+        }
+        if (res == WAIT_OBJECT_0)
+        {
+            WRITE_EVENT_DEBUG("Waited successfully");
+            return true;
+        }
+    }
+
+    if (count == max_count) // timed out
+    {
+        DEBUG_LOG("Wait for updater timed out");
+        WriteToEventLog("Waiting for process timeout out", EVENTLOG_WARNING_TYPE);
         return false;
     }
 
-    bool exit = GetExitCodeProcess(pi.hProcess, &ret) != 0;
-
-    DEBUG_LOG("Exit LaunchApp");
-    CloseHandle(pi.hProcess);
-    CloseHandle(pi.hThread);
-    return exit;
+    return true;
 }
 
 std::wstring UpdaterService::s2ws(const std::string& s) const
