@@ -85,6 +85,7 @@
     <None Include="README.md" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="json.hpp" />
     <ClInclude Include="service_base.h" />
     <ClInclude Include="service_installer.h" />
     <ClInclude Include="updater_service.h" />

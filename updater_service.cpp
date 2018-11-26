@@ -5,6 +5,8 @@
 #include <winnt.h>
 #include <tchar.h>
 #include <cstdlib>
+#include <fstream>
+#include "json.hpp"
 
 #include <iostream>
 #ifdef _DEBUG
@@ -18,6 +20,13 @@
 using namespace std::string_literals;
 using namespace std::chrono_literals;
 
+std::string executable_filepath()
+{
+    char p[1024];
+    DWORD real_size = GetModuleFileName(NULL, p, 1024);
+    return std::string{ p, real_size };
+}
+
 UpdaterService::UpdaterService(int argc, char *argv[])
     : ServiceBase(
         _T("UpdaterService"),
@@ -29,12 +38,14 @@ UpdaterService::UpdaterService(int argc, char *argv[])
     , count_(0)
     , interval_(0)
 {
-    ProcessArgs(argc, argv);
 }
 
 void UpdaterService::OnStart(DWORD argc, TCHAR* argv[])
 {
-    ProcessArgs(static_cast<int>(argc), static_cast<char**>(argv));
+    if (argc > 1)
+        WriteToEventLog("Executable arguments not supported! Use config instead", EVENTLOG_WARNING_TYPE);
+
+    ProcessConfig();
 
     if (!CheckArgs())
     {
@@ -206,6 +217,59 @@ void UpdaterService::ProcessArgs(int argc, char* argv[])
     }
 }
 
+void UpdaterService::ProcessConfig()
+{
+    using nlohmann::json;
+    namespace fs = std::experimental::filesystem;
+    std::string exec = executable_filepath();
+    if (exec.empty())
+    {
+        WriteToEventLog(std::string{ "Cannot get executable path: " + std::to_string(GetLastError()) }.c_str(), EVENTLOG_ERROR_TYPE);
+        std::exit(-1);
+    }
+
+    fs::path config_path{ exec };
+    config_path = config_path.parent_path() / "config_updater.json";
+
+    if (!exists(config_path))
+    {
+        WriteToEventLog(std::string{ "config_updater.json file dont exist: " + config_path.string() }.c_str(), EVENTLOG_ERROR_TYPE);
+        std::exit(-1);
+    }
+
+    json options;
+    std::fstream file(config_path.string(), std::ios::in);
+    if (!file.is_open())
+    {
+        WriteToEventLog(std::string{ "Cannot open config file" + config_path.string() }.c_str(), EVENTLOG_ERROR_TYPE);
+        std::exit(-1);
+    }
+
+    try
+    {
+        file >> options;
+        std::string name = options["name"].get<std::string>();
+        SetName(_T(name.c_str()));
+        updater_filepath_ = options["updater"].get<std::string>();
+        updater_arguments_ = options["args"].get<std::string>();
+        auto temp_interval = options["interval"].get<unsigned long>();
+        interval_ = std::chrono::seconds{ temp_interval };
+        if (interval_ < 5s)
+            interval_ = 5s;
+        count_ = interval_ / 5s;
+        if (options.count("user") != 0)
+            user_runas_ = options["user"].get<std::string>();
+        if (options.count("pass") != 0)
+            user_pass_ = options["pass"].get<std::string>();
+    }
+    catch (json::exception &e)
+    {
+        WriteToEventLog(std::string{ "Caught exception: " + std::string{ e.what() } }.c_str(), EVENTLOG_ERROR_TYPE);
+        SetStatus(SERVICE_STOPPED);
+        std::exit(-1);
+    }
+}
+
 bool UpdaterService::CheckArgs() const
 {
     namespace fs = std::experimental::filesystem;
@@ -315,7 +379,7 @@ bool UpdaterService::LaunchAppWithLogon(std::wstring& args, DWORD &ret) const
     }
 
     std::chrono::milliseconds m{ 5min };
-    DWORD res = WaitForSingleObject(pi.hProcess, m.count());
+    DWORD res = WaitForSingleObject(pi.hProcess, static_cast<DWORD>(m.count()));
     if (res == WAIT_TIMEOUT || res == WAIT_FAILED)
     {
         DEBUG_LOG("Wait for updater timeout or failed");
@@ -370,7 +434,7 @@ bool UpdaterService::LaunchAppWithoutLogin(std::string& args, DWORD& ret) const
     }
 
     std::chrono::milliseconds m{ 5min };
-    DWORD res = WaitForSingleObject(pi.hProcess, m.count());
+    DWORD res = WaitForSingleObject(pi.hProcess, static_cast<DWORD>(m.count()));
     if (res == WAIT_TIMEOUT || res == WAIT_FAILED)
     {
         DEBUG_LOG("Wait for updater timeout or failed");
