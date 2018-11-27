@@ -8,9 +8,11 @@
 #include <fstream>
 #include "json.hpp"
 #include <reproc++/reproc.hpp>
+#include <reproc++/sink.hpp>
 #include <string>
 #include <sstream>
 #include <iostream>
+
 #ifdef _DEBUG
 #define DEBUG_LOG(x) do { std::cout << (x) << std::endl; } while(0)
 #define WRITE_EVENT_DEBUG(x) do { WriteToEventLog((x), EVENTLOG_WARNING_TYPE); } while(0)
@@ -40,39 +42,6 @@ UpdaterService::UpdaterService(int argc, char *argv[])
     , count_(0)
     , interval_(0)
 {
-}
-
-UpdaterService::HandleOwner::HandleOwner() : h_(NULL)
-{
-}
-
-UpdaterService::HandleOwner::HandleOwner(HANDLE handle) : h_(handle)
-{
-}
-
-
-UpdaterService::HandleOwner::~HandleOwner()
-{
-    if (h_ != NULL)
-        CloseHandle(h_);
-}
-
-UpdaterService::HandleOwner& UpdaterService::HandleOwner::operator=(HANDLE handle)
-{
-    if (h_ != NULL)
-        CloseHandle(h_);
-    h_ = handle;
-    return *this;
-}
-
-UpdaterService::HandleOwner::operator HANDLE() const
-{
-    return h_;
-}
-
-UpdaterService::HandleOwner::operator PHANDLE()
-{
-    return &h_;
 }
 
 void UpdaterService::OnStart(DWORD argc, TCHAR* argv[])
@@ -349,6 +318,7 @@ bool UpdaterService::LaunchApp(const std::string& additional_args, DWORD& ret)
     unsigned exit_status = 0;
     while (count < max_count)
     {
+        WRITE_EVENT_DEBUG("Waiting cycle");
         ++count;
         err = updater.wait(time_chunk.count(), &exit_status);
         if (exit_)
@@ -363,220 +333,20 @@ bool UpdaterService::LaunchApp(const std::string& additional_args, DWORD& ret)
             continue;
 
         ret = exit_status;
-        if (err)
-            WriteToEventLog(std::string{ "Error value: " + std::to_string(err.value()) }.c_str(), EVENTLOG_ERROR_TYPE);
+        if (err || ret == 3)
+        {
+            if (err)
+                WriteToEventLog(std::string{ "Error value: " + std::to_string(err.value()) }.c_str(), EVENTLOG_ERROR_TYPE);
+            std::string sink_string;
+            std::error_code ec = updater.drain(reproc::stream::out, reproc::string_sink(sink_string));
+            if (!ec)
+                WriteToEventLog(std::string{ "Program output: " + sink_string }.c_str(), EVENTLOG_WARNING_TYPE);
+            else
+                WriteToEventLog(std::string{ "Cannot print program output: " + std::to_string(ec.value()) }.c_str(), EVENTLOG_ERROR_TYPE);
+        }
         break;
     }
 
     WRITE_EVENT_DEBUG(std::string{ "Error value: " + std::to_string(err.value()) }.c_str());
     return !bool(err);
-
-    
-    std::wstring args_w = s2ws(args);
-
-    SECURITY_ATTRIBUTES saAttr;
-    saAttr.nLength = sizeof(SECURITY_ATTRIBUTES);
-    saAttr.bInheritHandle = TRUE;
-    saAttr.lpSecurityDescriptor = NULL;
-
-    child_out_wr = NULL;
-    child_out_rd = NULL;
-    
-    if (!CreatePipe(child_out_rd, child_out_wr, &saAttr, 0))
-        return false;
-    if (!SetHandleInformation(child_out_rd, HANDLE_FLAG_INHERIT, 0))
-        return false;
-
-    const auto readOutput = [&] {
-        DWORD dwRead;
-        CHAR buf[4096];
-        BOOL success = FALSE;
-        DEBUG_LOG("Reading app stdout");
-        for (;;)
-        {
-            success = ReadFile(child_out_rd, buf, 4096, &dwRead, NULL);
-            if (!success || dwRead == 0)
-                break;
-            std::string g{ "Process stdout: " + std::string(buf, dwRead) };
-            WriteToEventLog(g.c_str());
-        }
-    };
-
-    bool res;
-    if (user_runas_.empty())
-        res = LaunchAppWithoutLogon(args, ret);
-    else
-        res = LaunchAppWithLogon(args_w, ret);
-
-    if (!res)
-    {
-        child_out_wr = NULL;
-        readOutput();
-    }
-
-    return res;
-}
-
-bool UpdaterService::LaunchAppWithLogon(std::wstring& args, DWORD &ret) const
-{
-    namespace fs = std::experimental::filesystem;
-    fs::path updater_path(updater_filepath_);
-
-    STARTUPINFOW si;
-    ZeroMemory(&si, sizeof(STARTUPINFOW));
-    si.cb = sizeof(STARTUPINFOW);
-    si.hStdError = child_out_wr;
-    si.hStdOutput = child_out_wr;
-    si.dwFlags |= STARTF_USESTDHANDLES;
-
-    PROCESS_INFORMATION pi;
-    ZeroMemory(&pi, sizeof(pi));
-
-    HandleOwner proc;
-    HandleOwner thread;
-
-    if (CreateProcessWithLogonW(
-        s2ws(user_runas_).c_str(),
-        NULL,
-        s2ws(user_pass_).c_str(),
-        0,
-        updater_path.generic_wstring().c_str(),
-        const_cast<LPWSTR>(&args.data()[0]),
-        0,
-        NULL,
-        updater_path.parent_path().generic_wstring().c_str(),
-        &si,
-        &pi
-    ) == 0)
-    {
-        if (GetLastError() != 0)
-        {
-            DEBUG_LOG("Error launching app");
-            WriteToEventLog("Error launching app", EVENTLOG_ERROR_TYPE);
-            return false;
-        }
-    }
-
-    proc = pi.hProcess;
-    thread = pi.hThread;
-
-    bool exit = WaitForProcess(proc, 5min);
-    if (exit)
-        exit = GetExitCodeProcess(proc, &ret) != 0;
-
-    DEBUG_LOG("Exit LaunchApp");
-    return exit;
-}
-
-bool UpdaterService::LaunchAppWithoutLogon(std::string& args, DWORD& ret) const
-{
-    namespace fs = std::experimental::filesystem;
-    fs::path updater_path(updater_filepath_);
-
-    STARTUPINFO si;
-    ZeroMemory(&si, sizeof(STARTUPINFO));
-    si.cb = sizeof(STARTUPINFO);
-    si.hStdError = child_out_wr;
-    si.hStdOutput = child_out_wr;
-    si.dwFlags |= STARTF_USESTDHANDLES;
-
-    PROCESS_INFORMATION pi;
-    ZeroMemory(&pi, sizeof(pi));
-
-    HandleOwner proc;
-    HandleOwner thread;
-
-    if (CreateProcess(
-        updater_path.generic_string().c_str(),
-        const_cast<LPSTR>(args.c_str()),
-        NULL,
-        NULL,
-        FALSE,
-        0,
-        NULL,
-        updater_path.parent_path().generic_string().c_str(),
-        &si,
-        &pi
-    ) == 0)
-    {
-        if (GetLastError() != 0)
-        {
-            DEBUG_LOG("Error launching app");
-            WriteToEventLog("Error launching app", EVENTLOG_ERROR_TYPE);
-            return false;
-        }
-    }
-
-    proc = pi.hProcess;
-    thread = pi.hThread;
-
-    bool exit = WaitForProcess(proc, 5min);
-    if (exit)
-        exit = GetExitCodeProcess(proc, &ret) != 0;
-    DEBUG_LOG("Exit LaunchApp");
-    return exit;
-}
-
-bool UpdaterService::WaitForProcess(const HandleOwner& process, std::chrono::milliseconds msecs) const
-{
-    std::chrono::milliseconds timeout_chunk{ 5s };
-    const uint64_t max_count = (msecs >= 5s ? msecs : 5s) / timeout_chunk;
-    uint64_t count{ 0 };
-    while (count < max_count)
-    {
-        ++count;
-        DWORD res = WaitForSingleObject(process, static_cast<DWORD>(timeout_chunk.count()));
-        if (res == WAIT_TIMEOUT)
-        {
-            if (!exit_)
-            {
-                WRITE_EVENT_DEBUG("Waiting timed out, new cycle");
-                continue;
-            }
-
-            WRITE_EVENT_DEBUG("Waiting timeout out, terminating process");
-            TerminateProcess(process, 3);
-            return true;
-        }
-        if (res == WAIT_FAILED)
-        {
-            if (GetLastError() == 109)
-            {
-                // app wrote nothing to stdout and closed pipe
-                // probably it exited successfully
-                WRITE_EVENT_DEBUG("Broken pipe in waiting for app. Exiting with true");
-                return true;
-            }
-
-            DEBUG_LOG("Wait for updater failed");
-            WriteToEventLog(std::string{ "Waiting for process failed: " + std::to_string(GetLastError()) }.c_str(), EVENTLOG_WARNING_TYPE);
-            return false;
-        }
-        if (res == WAIT_OBJECT_0)
-        {
-            WRITE_EVENT_DEBUG("Waited successfully");
-            return true;
-        }
-    }
-
-    if (count == max_count) // timed out
-    {
-        DEBUG_LOG("Wait for updater timed out");
-        WriteToEventLog("Waiting for process timeout out", EVENTLOG_WARNING_TYPE);
-        return false;
-    }
-
-    return true;
-}
-
-std::wstring UpdaterService::s2ws(const std::string& s) const
-{
-    int len;
-    int slength = (int)s.length() + 1;
-    len = MultiByteToWideChar(CP_ACP, 0, s.c_str(), slength, 0, 0);
-    wchar_t* buf = new wchar_t[len];
-    MultiByteToWideChar(CP_ACP, 0, s.c_str(), slength, buf, len);
-    std::wstring r(buf);
-    delete[] buf;
-    return r;
 }
