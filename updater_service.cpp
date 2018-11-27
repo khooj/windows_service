@@ -7,7 +7,9 @@
 #include <cstdlib>
 #include <fstream>
 #include "json.hpp"
-
+#include <reproc++/reproc.hpp>
+#include <string>
+#include <sstream>
 #include <iostream>
 #ifdef _DEBUG
 #define DEBUG_LOG(x) do { std::cout << (x) << std::endl; } while(0)
@@ -331,7 +333,45 @@ bool UpdaterService::CheckArgs() const
 
 bool UpdaterService::LaunchApp(const std::string& additional_args, DWORD& ret)
 {
+    reproc::process updater;
     std::string args{ updater_arguments_ + " " + additional_args };
+    std::vector<std::string> a;
+    std::stringstream str;
+    str << args;
+    std::string tmp;
+    while (str >> tmp)
+        a.push_back(tmp);
+    std::error_code err = updater.start(a);
+
+    std::chrono::milliseconds time_chunk{ 5s };
+    const uint64_t max_count = 5min / time_chunk;
+    uint64_t count = 0;
+    unsigned exit_status = 0;
+    while (count < max_count)
+    {
+        ++count;
+        err = updater.wait(time_chunk.count(), &exit_status);
+        if (exit_)
+        {
+            err = updater.terminate(time_chunk.count(), &exit_status);
+            if (err)
+                updater.kill(0, &exit_status);
+            return false;
+        }
+
+        if (err == reproc::errc::wait_timeout)
+            continue;
+
+        ret = exit_status;
+        if (err)
+            WriteToEventLog(std::string{ "Error value: " + std::to_string(err.value()) }.c_str(), EVENTLOG_ERROR_TYPE);
+        break;
+    }
+
+    WRITE_EVENT_DEBUG(std::string{ "Error value: " + std::to_string(err.value()) }.c_str());
+    return !bool(err);
+
+    
     std::wstring args_w = s2ws(args);
 
     SECURITY_ATTRIBUTES saAttr;
