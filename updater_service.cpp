@@ -39,7 +39,7 @@ UpdaterService::UpdaterService(int argc, char *argv[])
         SERVICE_ERROR_NORMAL,
         SERVICE_ACCEPT_STOP)
     , exit_(false)
-    , count_(0)
+    , max_count_(0)
     , interval_(0)
 {
 }
@@ -78,7 +78,7 @@ void UpdaterService::Work()
         WRITE_EVENT_DEBUG("New cycle");
         std::this_thread::sleep_for(5s);
         ++current_count;
-        if (current_count <= count_)
+        if (current_count <= max_count_)
             continue;
         current_count = 0;
         DWORD ret = -1;
@@ -192,7 +192,7 @@ void UpdaterService::ProcessArgs(int argc, char* argv[])
             interval_ = std::chrono::seconds{ tmp };
             if (interval_ < 5s)
                 interval_ = 5s;
-            count_ = interval_ / 5s;
+            max_count_ = interval_ / 5s;
             std::string g{ "Interval: " + std::to_string(interval_.count()) };
             WRITE_EVENT_DEBUG(g.c_str());
             DEBUG_LOG(g);
@@ -267,7 +267,7 @@ void UpdaterService::ProcessConfig()
         interval_ = std::chrono::seconds{ temp_interval };
         if (interval_ < 5s)
             interval_ = 5s;
-        count_ = interval_ / 5s;
+        max_count_ = interval_ / 5s;
         if (options.count("user") != 0)
             user_runas_ = options["user"].get<std::string>();
         if (options.count("pass") != 0)
@@ -291,7 +291,7 @@ bool UpdaterService::CheckArgs() const
         return false;
     }
 
-    if (count_ == 0)
+    if (max_count_ == 0)
     {
         WriteToEventLog("Interval is invalid", EVENTLOG_ERROR_TYPE);
         return false;
@@ -313,10 +313,9 @@ bool UpdaterService::LaunchApp(const std::string& additional_args, DWORD& ret)
     std::error_code err = updater.start(a);
 
     std::chrono::milliseconds time_chunk{ 5s };
-    const uint64_t max_count = 5min / time_chunk;
     uint64_t count = 0;
     unsigned exit_status = 0;
-    while (count < max_count)
+    while (count < max_count_)
     {
         WRITE_EVENT_DEBUG("Waiting cycle");
         ++count;

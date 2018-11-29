@@ -36,7 +36,7 @@ private:
     std::string updater_arguments_;
     std::string user_runas_;
     std::string user_pass_;
-    uint64_t count_;
+    uint64_t max_count_;
     std::chrono::seconds interval_;
 };
 
