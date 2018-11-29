@@ -96,6 +96,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="json.hpp" />
+    <ClInclude Include="resource.h" />
     <ClInclude Include="service_base.h" />
     <ClInclude Include="service_installer.h" />
     <ClInclude Include="updater_service.h" />
@@ -112,6 +113,9 @@
     <ProjectReference Include="reproc_sln\reproc++.vcxproj">
       <Project>{f1e5e53f-3d60-3d1a-89cf-b4acaf8cc2a3}</Project>
     </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="windows_service.rc" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
