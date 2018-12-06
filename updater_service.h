@@ -29,6 +29,7 @@ private:
     void ProcessConfig();
     bool CheckArgs() const;
     bool LaunchApp(const std::string& additional_args, DWORD &ret);
+    void CreateDefaultConfig(const std::string& config);
 
     std::unique_ptr<std::thread> thread_;
     bool exit_;

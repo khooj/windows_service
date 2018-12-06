@@ -244,8 +244,8 @@ void UpdaterService::ProcessConfig()
 
     if (!exists(config_path))
     {
-        WriteToEventLog(std::string{ "config_updater.json file dont exist: " + config_path.string() }.c_str(), EVENTLOG_ERROR_TYPE);
-        std::exit(-1);
+        WriteToEventLog(std::string{ "config_updater.json file dont exist, creating default: " + config_path.string() }.c_str(), EVENTLOG_WARNING_TYPE);
+        CreateDefaultConfig("config_updater.json");
     }
 
     json options;
@@ -274,6 +274,31 @@ void UpdaterService::ProcessConfig()
             user_pass_ = options["pass"].get<std::string>();
     }
     catch (json::exception &e)
+    {
+        WriteToEventLog(std::string{ "Caught exception: " + std::string{ e.what() } }.c_str(), EVENTLOG_ERROR_TYPE);
+        SetStatus(SERVICE_STOPPED);
+        std::exit(-1);
+    }
+}
+
+void UpdaterService::CreateDefaultConfig(const std::string& filename)
+{
+    namespace fs = std::experimental::filesystem;
+    using nlohmann::json;
+
+    fs::path config{ executable_filepath() };
+    config = config.parent_path() / filename;
+    json options;
+    options["name"] = "AgentUpdater";
+    options["updater"] = "C:\\miner\\NAppUpdate.Updater.Standalone.exe";
+    options["args"] = "-f ftp://10.7.5.32/distro/miner/feed.xml -c read-ftp:Aa123456";
+    options["interval"] = 300;
+
+    std::fstream file{ config.c_str(), std::ios::out };
+    try
+    {
+        file << options;
+    } catch (std::exception &e)
     {
         WriteToEventLog(std::string{ "Caught exception: " + std::string{ e.what() } }.c_str(), EVENTLOG_ERROR_TYPE);
         SetStatus(SERVICE_STOPPED);
