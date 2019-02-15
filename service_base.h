@@ -3,6 +3,7 @@
 
 #include <windows.h>
 #include <atlstr.h>
+#include <string>
 
 // Base Service class used to create windows services.
 class ServiceBase
@@ -49,7 +50,7 @@ protected:
 
     // TODO(Olster): Move out of class/make static.
     // Writes |msg| to Windows event log.
-    void WriteToEventLog(const CString& msg, WORD type = EVENTLOG_INFORMATION_TYPE) const;
+    void WriteToEventLog(const std::string& msg, WORD type = EVENTLOG_INFORMATION_TYPE) const;
 
     // Overro=ide these functions as you need.
     virtual void OnStart(DWORD argc, TCHAR* argv[]) = 0;

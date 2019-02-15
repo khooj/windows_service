@@ -38,12 +38,12 @@ void ServiceBase::SetStatus(DWORD dwState, DWORD dwErrCode, DWORD dwWait)
     ::SetServiceStatus(m_svcStatusHandle, &m_svcStatus);
 }
 
-void ServiceBase::WriteToEventLog(const CString& msg, WORD type) const
+void ServiceBase::WriteToEventLog(const std::string& msg, WORD type) const
 {
     HANDLE hSource = RegisterEventSource(nullptr, m_name);
     if (hSource)
     {
-        const TCHAR* msgData[2] = {m_name, msg};
+        const TCHAR* msgData[2] = {m_name, msg.c_str()};
         ReportEvent(hSource, type, 0, 0, nullptr, 2, 0, msgData, nullptr);
         DeregisterEventSource(hSource);
     }

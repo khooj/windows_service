@@ -1,0 +1,17 @@
+---
+Checks:
+'
+*,
+-bugprone-exception-escape,
+-cert-err58-cpp,
+-clang-diagnostic-unused-command-line-argument,
+-fuchsia-default-arguments,
+-fuchsia-overloaded-operator,
+-fuchsia-statically-constructed-objects,
+-google-runtime-references,
+-hicpp-multiway-paths-covered,
+-hicpp-signed-bitwise,
+-readability-else-after-return
+'
+...
+

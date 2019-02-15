@@ -12,6 +12,9 @@
 #include <string>
 #include <sstream>
 #include <iostream>
+#include <curl/curl.h>
+
+#define EVENTLOG_MY_DEBUG 0x1000
 
 #ifdef _DEBUG
 #define DEBUG_LOG(x) do { std::cout << (x) << std::endl; } while(0)
@@ -272,6 +275,8 @@ void UpdaterService::ProcessConfig()
             user_runas_ = options["user"].get<std::string>();
         if (options.count("pass") != 0)
             user_pass_ = options["pass"].get<std::string>();
+        if (options.count("logger_server") != 0)
+            logger_server_ = options["log_server"].get<std::string>();
     }
     catch (json::exception &e)
     {
@@ -293,6 +298,7 @@ void UpdaterService::CreateDefaultConfig(const std::string& filename)
     options["updater"] = "C:\\miner\\NAppUpdate.Updater.Standalone.exe";
     options["args"] = "-f ftp://10.7.5.32/distro/miner/feed.xml -c read-ftp:Aa123456";
     options["interval"] = 300;
+    options["log_server"] = "http://gilmutdinov.ru:9000";
 
     std::fstream file{ config.c_str(), std::ios::out };
     try
@@ -303,6 +309,59 @@ void UpdaterService::CreateDefaultConfig(const std::string& filename)
         WriteToEventLog(std::string{ "Caught exception: " + std::string{ e.what() } }.c_str(), EVENTLOG_ERROR_TYPE);
         SetStatus(SERVICE_STOPPED);
         std::exit(-1);
+    }
+}
+
+void UpdaterService::Log(WORD level, const std::string& message)
+{
+    if (level == EVENTLOG_MY_DEBUG)
+        WRITE_EVENT_DEBUG(message.c_str());
+    else
+        WriteToEventLog(message.c_str(), level);
+
+    //trying to post log to seq
+    if (!logger_server_.empty())
+    {
+        using nlohmann::json;
+
+        std::string seqLevel;
+        switch (level)
+        {
+        case EVENTLOG_ERROR_TYPE: seqLevel = "Error"; break;
+        case EVENTLOG_WARNING_TYPE: seqLevel = "Warning"; break;
+        case EVENTLOG_INFORMATION_TYPE: seqLevel = "Information"; break;
+        case EVENTLOG_MY_DEBUG: seqLevel = "Debug"; break;
+        default:
+            return;
+        }
+
+        std::time_t timestamp = std::time(nullptr);
+        char buf[64] = { 0 };
+        strftime(buf, 32, "%Y-%m-%dT%H:%M:%S.00000-TZD", localtime(&timestamp));
+        json body;
+        body["Level"] = seqLevel;
+        body["Timestamp"] = buf;
+        body["Message"] = message;
+        json wrapper;
+        wrapper["Events"] = json::array({ body });
+
+        CURL *curl;
+        CURLcode res;
+        curl_global_init(CURL_GLOBAL_ALL);
+        curl = curl_easy_init();
+        if (curl)
+        {
+            curl_easy_setopt(curl, CURLOPT_URL, logger_server_.c_str());
+            curl_easy_setopt(curl, CURLOPT_POSTFIELDS, wrapper.dump().c_str());
+            res = curl_easy_perform(curl);
+            if (res != CURLE_OK)
+            {
+                std::string err = curl_easy_strerror(res);
+                WriteToEventLog("Log send error: "s + err, EVENTLOG_ERROR_TYPE);
+            }
+            curl_easy_cleanup(curl);
+        }
+        curl_global_cleanup();
     }
 }
 
@@ -344,12 +403,12 @@ bool UpdaterService::LaunchApp(const std::string& additional_args, DWORD& ret)
     {
         WRITE_EVENT_DEBUG("Waiting cycle");
         ++count;
-        err = updater.wait(time_chunk.count(), &exit_status);
+        err = updater.wait(time_chunk, &exit_status);
         if (exit_)
         {
-            err = updater.terminate(time_chunk.count(), &exit_status);
+            err = updater.terminate();
             if (err)
-                updater.kill(0, &exit_status);
+                updater.kill();
             return false;
         }
 

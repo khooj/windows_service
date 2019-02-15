@@ -30,6 +30,7 @@ private:
     bool CheckArgs() const;
     bool LaunchApp(const std::string& additional_args, DWORD &ret);
     void CreateDefaultConfig(const std::string& config);
+    void Log(WORD level, const std::string& message);
 
     std::unique_ptr<std::thread> thread_;
     bool exit_;
@@ -37,6 +38,7 @@ private:
     std::string updater_arguments_;
     std::string user_runas_;
     std::string user_pass_;
+    std::string logger_server_;
     uint64_t max_count_;
     std::chrono::seconds interval_;
 };
