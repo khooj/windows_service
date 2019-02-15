@@ -9,7 +9,7 @@ generate_product_version(
 	NAME "windows_service"
 	ICON ${CMAKE_CURRENT_SOURCE_DIR}/windows_service.ico
 	VERSION_MAJOR 1
-	VERSION_MINOR 1
+	VERSION_MINOR 2
 	VERSION_PATH ${BUILD_COUNTER}
 	VERSION_REVISION ${BUILD_REVISION}
 )

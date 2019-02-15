@@ -30,7 +30,7 @@ private:
     bool CheckArgs() const;
     bool LaunchApp(const std::string& additional_args, DWORD &ret);
     void CreateDefaultConfig(const std::string& config);
-    void Log(WORD level, const std::string& message);
+    void Log(const std::string& message, WORD level, bool wait = true) const;
 
     std::unique_ptr<std::thread> thread_;
     bool exit_;

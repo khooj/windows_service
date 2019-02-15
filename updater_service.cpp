@@ -13,6 +13,8 @@
 #include <sstream>
 #include <iostream>
 #include <curl/curl.h>
+#include <thread>
+#include <windows.h>
 
 #define EVENTLOG_MY_DEBUG 0x1000
 
@@ -34,6 +36,16 @@ std::string executable_filepath()
     return std::string{ p, real_size };
 }
 
+std::string machine_name()
+{
+    char p[MAX_COMPUTERNAME_LENGTH + 1];
+    DWORD size = sizeof p;
+    BOOL result = GetComputerName(p, &size);
+    if (result)
+        return { p, size };
+    return {};
+}
+
 UpdaterService::UpdaterService(int argc, char *argv[])
     : ServiceBase(
         _T("UpdaterService"),
@@ -50,7 +62,7 @@ UpdaterService::UpdaterService(int argc, char *argv[])
 void UpdaterService::OnStart(DWORD argc, TCHAR* argv[])
 {
     if (argc > 1)
-        WriteToEventLog("Executable arguments not supported! Use config instead", EVENTLOG_WARNING_TYPE);
+        WriteToEventLog("Executable arguments not supported! Use config instead", EVENTLOG_INFORMATION_TYPE);
 
     ProcessConfig();
 
@@ -61,14 +73,14 @@ void UpdaterService::OnStart(DWORD argc, TCHAR* argv[])
 
     updater_arguments_ = updater_filepath_ + " " + updater_arguments_;
     exit_ = false;
-    WriteToEventLog("Started");
+    WriteToEventLog("Started", EVENTLOG_INFORMATION_TYPE);
     thread_ = std::make_unique<std::thread>(std::bind(&UpdaterService::Work, this));
 }
 
 void UpdaterService::OnStop()
 {
     exit_ = true;
-    WriteToEventLog("Stopped");
+    WriteToEventLog("Stopped", EVENTLOG_INFORMATION_TYPE);
     if (thread_->joinable())
         thread_->join();
 }
@@ -88,7 +100,7 @@ void UpdaterService::Work()
         if (!LaunchApp(std::string(), ret))
         {
             std::string g{ "Error while launching updater: " + std::to_string(GetLastError()) };
-            WriteToEventLog(g.c_str(), EVENTLOG_ERROR_TYPE);
+            Log(g, EVENTLOG_ERROR_TYPE);
             break;
         }
 
@@ -101,7 +113,7 @@ void UpdaterService::Work()
         if (ret == 3)
         {
             std::string g{ "Updater returned error" };
-            WriteToEventLog(g.c_str(), EVENTLOG_ERROR_TYPE);
+            Log(g, EVENTLOG_ERROR_TYPE);
             continue;
         }
 
@@ -111,7 +123,7 @@ void UpdaterService::Work()
             if (!LaunchApp(std::string("-u"), ret))
             {
                 std::string g{ "Error while launching updater with -u: " + std::to_string(GetLastError()) };
-                WriteToEventLog(g.c_str(), EVENTLOG_ERROR_TYPE);
+                Log(g, EVENTLOG_ERROR_TYPE);
                 break;
             }
 
@@ -137,7 +149,7 @@ void UpdaterService::ProcessArgs(int argc, char* argv[])
         {
             if (i + 1 > argc)
             {
-                WriteToEventLog("Wrong name args", EVENTLOG_ERROR_TYPE);
+                Log("Wrong name args", EVENTLOG_ERROR_TYPE);
                 return;
             }
 
@@ -158,7 +170,7 @@ void UpdaterService::ProcessArgs(int argc, char* argv[])
         {
             if (i + 1 > argc)
             {
-                WriteToEventLog("Wrong updater args", EVENTLOG_ERROR_TYPE);
+                Log("Wrong updater args", EVENTLOG_ERROR_TYPE);
                 return;
             }
 
@@ -172,7 +184,7 @@ void UpdaterService::ProcessArgs(int argc, char* argv[])
         {
             if (i + 1 > argc)
             {
-                WriteToEventLog("Wrong updater arguments", EVENTLOG_ERROR_TYPE);
+                Log("Wrong updater arguments", EVENTLOG_ERROR_TYPE);
                 return;
             }
 
@@ -186,7 +198,7 @@ void UpdaterService::ProcessArgs(int argc, char* argv[])
         {
             if (i + 1 > argc)
             {
-                WriteToEventLog("Wrong interval args", EVENTLOG_ERROR_TYPE);
+                Log("Wrong interval args", EVENTLOG_ERROR_TYPE);
                 return;
             }
 
@@ -205,7 +217,7 @@ void UpdaterService::ProcessArgs(int argc, char* argv[])
         {
             if (i + 1 > argc)
             {
-                WriteToEventLog("Wrong user args", EVENTLOG_ERROR_TYPE);
+                Log("Wrong user args", EVENTLOG_ERROR_TYPE);
                 return;
             }
 
@@ -219,7 +231,7 @@ void UpdaterService::ProcessArgs(int argc, char* argv[])
         {
             if (i + 1 > argc)
             {
-                WriteToEventLog("Wrong user pass", EVENTLOG_ERROR_TYPE);
+                Log("Wrong user pass", EVENTLOG_ERROR_TYPE);
                 return;
             }
 
@@ -238,7 +250,7 @@ void UpdaterService::ProcessConfig()
     std::string exec = executable_filepath();
     if (exec.empty())
     {
-        WriteToEventLog(std::string{ "Cannot get executable path: " + std::to_string(GetLastError()) }.c_str(), EVENTLOG_ERROR_TYPE);
+        Log(std::string{ "Cannot get executable path: " + std::to_string(GetLastError()) }, EVENTLOG_ERROR_TYPE);
         std::exit(-1);
     }
 
@@ -247,7 +259,7 @@ void UpdaterService::ProcessConfig()
 
     if (!exists(config_path))
     {
-        WriteToEventLog(std::string{ "config_updater.json file dont exist, creating default: " + config_path.string() }.c_str(), EVENTLOG_WARNING_TYPE);
+        Log(std::string{ "config_updater.json file dont exist, creating default: " + config_path.string() }, EVENTLOG_WARNING_TYPE);
         CreateDefaultConfig("config_updater.json");
     }
 
@@ -255,7 +267,7 @@ void UpdaterService::ProcessConfig()
     std::fstream file(config_path.string(), std::ios::in);
     if (!file.is_open())
     {
-        WriteToEventLog(std::string{ "Cannot open config file" + config_path.string() }.c_str(), EVENTLOG_ERROR_TYPE);
+        Log(std::string{ "Cannot open config file" + config_path.string() }, EVENTLOG_ERROR_TYPE);
         std::exit(-1);
     }
 
@@ -275,12 +287,12 @@ void UpdaterService::ProcessConfig()
             user_runas_ = options["user"].get<std::string>();
         if (options.count("pass") != 0)
             user_pass_ = options["pass"].get<std::string>();
-        if (options.count("logger_server") != 0)
+        if (options.count("log_server") != 0)
             logger_server_ = options["log_server"].get<std::string>();
     }
     catch (json::exception &e)
     {
-        WriteToEventLog(std::string{ "Caught exception: " + std::string{ e.what() } }.c_str(), EVENTLOG_ERROR_TYPE);
+        Log(std::string{ "Caught exception: " + std::string{ e.what() } }, EVENTLOG_ERROR_TYPE);
         SetStatus(SERVICE_STOPPED);
         std::exit(-1);
     }
@@ -298,7 +310,7 @@ void UpdaterService::CreateDefaultConfig(const std::string& filename)
     options["updater"] = "C:\\miner\\NAppUpdate.Updater.Standalone.exe";
     options["args"] = "-f ftp://10.7.5.32/distro/miner/feed.xml -c read-ftp:Aa123456";
     options["interval"] = 300;
-    options["log_server"] = "http://gilmutdinov.ru:9000";
+    options["log_server"] = "http://gilmutdinov.ru:9001/api/events/raw";
 
     std::fstream file{ config.c_str(), std::ios::out };
     try
@@ -306,19 +318,21 @@ void UpdaterService::CreateDefaultConfig(const std::string& filename)
         file << options;
     } catch (std::exception &e)
     {
-        WriteToEventLog(std::string{ "Caught exception: " + std::string{ e.what() } }.c_str(), EVENTLOG_ERROR_TYPE);
+        Log(std::string{ "Caught exception: " + std::string{ e.what() } }, EVENTLOG_ERROR_TYPE);
         SetStatus(SERVICE_STOPPED);
         std::exit(-1);
     }
 }
 
-void UpdaterService::Log(WORD level, const std::string& message)
+void UpdaterService::Log(const std::string& message, WORD level, bool wait) const
 {
     if (level == EVENTLOG_MY_DEBUG)
         WRITE_EVENT_DEBUG(message.c_str());
     else
-        WriteToEventLog(message.c_str(), level);
+        WriteToEventLog(message, level);
 
+    WRITE_EVENT_DEBUG("log server addr");
+    WRITE_EVENT_DEBUG(logger_server_);
     //trying to post log to seq
     if (!logger_server_.empty())
     {
@@ -337,31 +351,55 @@ void UpdaterService::Log(WORD level, const std::string& message)
 
         std::time_t timestamp = std::time(nullptr);
         char buf[64] = { 0 };
-        strftime(buf, 32, "%Y-%m-%dT%H:%M:%S.00000-TZD", localtime(&timestamp));
+        strftime(buf, 32, "%Y-%m-%dT%T.00000%z", localtime(&timestamp));
         json body;
         body["Level"] = seqLevel;
         body["Timestamp"] = buf;
-        body["Message"] = message;
+        body["MessageTemplate"] = "(windows_updater: {machine_name}) {msg}";
+        json prop;
+        prop["machine_name"] = machine_name();
+        prop["msg"] = message;
+        body["Properties"] = prop;
         json wrapper;
         wrapper["Events"] = json::array({ body });
 
-        CURL *curl;
-        CURLcode res;
-        curl_global_init(CURL_GLOBAL_ALL);
-        curl = curl_easy_init();
-        if (curl)
+        WRITE_EVENT_DEBUG("wrapper json");
+        WRITE_EVENT_DEBUG(wrapper.dump().c_str());
+
+        // thougth about async call but wont do it now
+        const auto log_send = [&](std::string json, std::string srv)
         {
-            curl_easy_setopt(curl, CURLOPT_URL, logger_server_.c_str());
-            curl_easy_setopt(curl, CURLOPT_POSTFIELDS, wrapper.dump().c_str());
-            res = curl_easy_perform(curl);
-            if (res != CURLE_OK)
+            CURL *curl;
+            CURLcode res;
+            curl_global_init(CURL_GLOBAL_ALL);
+            curl = curl_easy_init();
+            if (curl)
             {
-                std::string err = curl_easy_strerror(res);
-                WriteToEventLog("Log send error: "s + err, EVENTLOG_ERROR_TYPE);
+                WRITE_EVENT_DEBUG("curl initialized");
+                curl_easy_setopt(curl, CURLOPT_URL, srv.c_str());
+                curl_easy_setopt(curl, CURLOPT_POST, 1);
+                curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, json.size());
+                curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json.c_str());
+
+                struct curl_slist *hs = nullptr;
+                hs = curl_slist_append(hs, "Content-Type: application/json");
+                curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hs);
+                res = curl_easy_perform(curl);
+                if (res != CURLE_OK)
+                {
+                    std::string err = curl_easy_strerror(res);
+                    WriteToEventLog("Log send error: "s + err, EVENTLOG_ERROR_TYPE);
+                }
+                curl_easy_cleanup(curl);
             }
-            curl_easy_cleanup(curl);
-        }
-        curl_global_cleanup();
+            curl_global_cleanup();
+        };
+
+        std::thread perform_log_send{ log_send, wrapper.dump(-1, ' ', true), logger_server_ };
+        if (wait)
+            perform_log_send.join();
+        else
+            perform_log_send.detach();
     }
 }
 
@@ -371,13 +409,13 @@ bool UpdaterService::CheckArgs() const
     const fs::path p(updater_filepath_);
     if (!fs::exists(p))
     {
-        WriteToEventLog("Executable path not exists", EVENTLOG_ERROR_TYPE);
+        Log("Executable path not exists", EVENTLOG_ERROR_TYPE);
         return false;
     }
 
     if (max_count_ == 0)
     {
-        WriteToEventLog("Interval is invalid", EVENTLOG_ERROR_TYPE);
+        Log("Interval is invalid", EVENTLOG_ERROR_TYPE);
         return false;
     }
 
@@ -419,13 +457,13 @@ bool UpdaterService::LaunchApp(const std::string& additional_args, DWORD& ret)
         if (err || ret == 3)
         {
             if (err)
-                WriteToEventLog(std::string{ "Error value: " + std::to_string(err.value()) }.c_str(), EVENTLOG_ERROR_TYPE);
+                Log(std::string{ "Error value: " + std::to_string(err.value()) }, EVENTLOG_ERROR_TYPE);
             std::string sink_string;
             std::error_code ec = updater.drain(reproc::stream::out, reproc::string_sink(sink_string));
             if (!ec)
-                WriteToEventLog(std::string{ "Program output: " + sink_string }.c_str(), EVENTLOG_WARNING_TYPE);
+                Log(std::string{ "Program output: " + sink_string }, EVENTLOG_ERROR_TYPE);
             else
-                WriteToEventLog(std::string{ "Cannot print program output: " + std::to_string(ec.value()) }.c_str(), EVENTLOG_ERROR_TYPE);
+                Log(std::string{ "Cannot print program output: " + std::to_string(ec.value()) }, EVENTLOG_ERROR_TYPE);
         }
         break;
     }
